@@ -1,8 +1,12 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import { loadTags } from './ctags';
+
+import { Subject, Subscription } from 'rxjs';
+import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 const Fuse = require('fuse.js');
+
+import { loadTags } from './ctags';
 
 
 // this method is called when your extension is activated
@@ -27,7 +31,8 @@ export function activate(context: vscode.ExtensionContext) {
 			vscode.window.showInformationMessage('No rootPath');
 			return;
 		}
-		const tags = loadTags(rootPath, 'tags');
+		const tagPath = vscode.workspace.getConfiguration('ctags').get('tagPath') as string;
+		const tags = loadTags(rootPath, tagPath);
 		vscode.window.showInformationMessage('Tags loaded');
 		searchTags(tags);
 	});
@@ -63,23 +68,37 @@ async function searchTags(tags: Array<{}>) {
 async function searchTagsQuickPick(tags: Array<{}>) {
 	const options = {
 		includeScore: true,
-		keys: ['label']
+		keys: ['match']
 	};
 	const fuse = new Fuse(tags, options);
+	let input: vscode.QuickPick<any>;
 	const disposables: vscode.Disposable[] = [];
+	const subject = new Subject();
+	const conf = vscode.workspace.getConfiguration('ctags')
+	const debounce = conf.get('debounceTime') as number;
+	const maxNumberOfMatches = conf.get('maxNumberOfMatches') as number;
+
+	const sub: Subscription = subject.pipe(
+		debounceTime(debounce),
+		distinctUntilChanged(),
+	).subscribe((value) => {
+		input.busy = true;
+		if (!value) {
+			input.items = [];
+		} else {
+		const result = fuse.search(value);
+		input.items = result.map((r: any) => r.item).slice(0, maxNumberOfMatches);
+		}
+		input.busy = false;
+	});
 	try {
 		return await new Promise<{} | undefined>((resolve, reject) => {
-			const input = vscode.window.createQuickPick();
+			input = vscode.window.createQuickPick();
 			input.sortByLabel = false;
 			input.placeholder = 'Type to search for tags';
 			disposables.push(
 				input.onDidChangeValue(value => {
-					if (!value) {
-						input.items = [];
-						return;
-					}
-					const result = fuse.search(value);
-					input.items = result.map((r: any) => r.item);
+					subject.next(value);
 				}),
 				input.onDidChangeSelection(items => {
 					resolve(items[0]);
@@ -94,5 +113,6 @@ async function searchTagsQuickPick(tags: Array<{}>) {
 		});
 	} finally {
 		disposables.forEach(d => d.dispose());
+		sub.unsubscribe();
 	}
 }

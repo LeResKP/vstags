@@ -10,7 +10,17 @@ const ICONS: any = {
     p: '$(symbol-parameter)',
 };
 
-export function loadTags(rootPath: string, tagPath: string){
+
+const TAGS_CACHES: any = {};
+
+export function loadTags(rootPath: string, tagPath: string) {
+	if (!TAGS_CACHES[rootPath]) {
+		TAGS_CACHES[rootPath] = _loadTags(rootPath, tagPath);
+	}
+	return TAGS_CACHES[rootPath];
+}
+
+function _loadTags(rootPath: string, tagPath: string){
     let tags=[];
     let liner = new lineByLine(path.join(rootPath, tagPath));
     let line;
@@ -46,6 +56,7 @@ export function loadTags(rootPath: string, tagPath: string){
             filePath: path.join(rootPath, relPath),
             lineNumber,
             alwaysShow: true,
+            match: name,
         });
 
     }

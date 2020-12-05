@@ -25,7 +25,27 @@
 				"command": "ctags.searchTags",
 				"key": "ctrl+t"
 			}
-		]
+		],
+		"configuration": {
+			"title": "Search tags",
+			"properties": {
+				"ctags.tagPath": {
+					"type": "string",
+					"default": "tags",
+					"description": "The tags file path"
+				},
+				"ctags.debounceTime": {
+					"type": "number",
+					"default": 200,
+					"description": "Debounce time during the search"
+				},
+				"ctags.maxNumberOfMatches": {
+					"type": "number",
+					"default": 50,
+					"description": "Maximun number of matches"
+				}
+			}
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
@@ -51,6 +71,7 @@
 	"dependencies": {
 		"fuse.js": "^6.4.3",
 		"n-readlines": "^1.0.1",
-		"path": "^0.12.7"
+		"path": "^0.12.7",
+		"rxjs": "^6.6.3"
 	}
 }
