@@ -72,17 +72,13 @@ function searchTags(text: string | null) {
 			return;
 		}
 		vscode.workspace.openTextDocument(item.filePath)
-			.then(document => vscode.window.showTextDocument(document))
-			.then(() => {
-				if (vscode.window.activeTextEditor) {
-					let line = item.lineNumber;
-					if (line > 0) {
-						line -= 1;
-					}
-					let newSelection = new vscode.Selection(line, 0, line, 0);
-					vscode.window.activeTextEditor.selection = newSelection;
-					vscode.window.activeTextEditor.revealRange(newSelection, vscode.TextEditorRevealType.InCenter);
+			.then(document => {
+				let line = item.lineNumber;
+				if (line > 0) {
+					line -= 1;
 				}
+				let newSelection = new vscode.Selection(line, 0, line, 0);
+				return vscode.window.showTextDocument(document, { preview: false, selection: newSelection });
 			});
 	});
 }
