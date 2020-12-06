@@ -81,8 +81,10 @@ function _loadTags(rootPath: string, tagPath: string){
 export function getCtagsCommand() {
     const tagPath = getTagFilePath() as string;
     const excludeFolders = getConfig('excludeFolders') as Array<string>;
-	const params = (excludeFolders).map((f) => `--exclude=${f}`).join(' ');
-	return `ctags -R --excmd=number ${params} -f ${tagPath}`;
+    const params = excludeFolders.map((f) => `--exclude=${f}`).join(' ');
+    const commandParams = getConfig('ctagsCommandParams') as Array<string>;
+    const extraParams = commandParams.join(' ');
+    return `ctags -R --excmd=number ${params} ${extraParams} -f ${tagPath}`;
 }
 
 

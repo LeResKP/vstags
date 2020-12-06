@@ -51,6 +51,12 @@
 						"node_modules"
 					],
 					"description": "Folders to exclude"
+				},
+				"ctags.ctagsCommandParams": {
+					"type": "array",
+					"items": "string",
+					"default": [],
+					"description": "Extra params to pass to the ctags command"
 				}
 			}
 		}
