@@ -20,32 +20,45 @@ export function activate(context: vscode.ExtensionContext) {
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
-	let disposable = vscode.commands.registerCommand('ctags.searchTags', () => {
+	let disposableSearchTags = vscode.commands.registerCommand('ctags.searchTags', () => {
 		// The code you place here will be executed every time your command is executed
+		doSearch(null);
+	});
 
-		if (! getTagFilePath()) {
-			vscode.window.showErrorMessage('ctags.tagPath can not be empty');
-			return;
-		}
-
-		if (! canActivatePlugin()) {
-			vscode.window.showInformationMessage('ctags can not be activated, you should be in a folder or workspace.');
-			return;
-		}
+	let disposableSearchTextTags = vscode.commands.registerCommand('ctags.searchTextTags', () => {
+		// The code you place here will be executed every time your command is executed
 		const editor = vscode.window.activeTextEditor;
 		let text = null;
 		if (editor) {
 			let selection = editor.selection;
 			text = editor.document.getText(selection).trim();
+			if (!text)  {
+				let range = editor.document.getWordRangeAtPosition(selection.active);
+				text = editor.document.getText(range);
+			}
 		}
-		searchTags(text);
+		doSearch(text);
 	});
 
-	context.subscriptions.push(disposable);
+	context.subscriptions.push(disposableSearchTags);
+	context.subscriptions.push(disposableSearchTextTags);
 }
 
 // this method is called when your extension is deactivated
 export function deactivate() {}
+
+function doSearch(text: string|null) {
+	if (! getTagFilePath()) {
+		vscode.window.showErrorMessage('ctags.tagPath can not be empty');
+		return;
+	}
+
+	if (! canActivatePlugin()) {
+		vscode.window.showInformationMessage('ctags can not be activated, you should be in a folder or workspace.');
+		return;
+	}
+	searchTags(text);
+}
 
 
 async function searchTags(text: string|null) {

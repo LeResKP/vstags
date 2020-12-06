@@ -24,6 +24,10 @@
 			{
 				"command": "ctags.searchTags",
 				"key": "ctrl+t"
+			},
+			{
+				"command": "ctags.searchTextTags",
+				"key": "ctrl+shift+t"
 			}
 		],
 		"configuration": {
