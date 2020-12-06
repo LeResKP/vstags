@@ -10,7 +10,7 @@
 		"Other"
 	],
 	"activationEvents": [
-		"onCommand:ctags.searchTags"
+		"*"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
@@ -43,6 +43,14 @@
 					"type": "number",
 					"default": 50,
 					"description": "Maximun number of matches"
+				},
+				"ctags.excludeFolders": {
+					"type": "array",
+					"items": "string",
+					"default": [
+						"node_modules"
+					],
+					"description": "Folders to exclude"
 				}
 			}
 		}

@@ -3,38 +3,36 @@
 import * as vscode from 'vscode';
 
 import { Subject, Subscription } from 'rxjs';
-import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, retry } from 'rxjs/operators';
 const Fuse = require('fuse.js');
 
-import { loadTags } from './ctags';
+import { checkTagsFileExists, loadTags, generateTags, displayCtagsCommand } from './ctags';
+import { canActivatePlugin, getConfig, getTagFilePath } from './helper';
 
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "ctags" is now active!');
+	// check the tag file exists. If not propose to generate it. If exists we populate the cache.
+	checkTagsFileExists();
+
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
 	let disposable = vscode.commands.registerCommand('ctags.searchTags', () => {
 		// The code you place here will be executed every time your command is executed
 
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Loading tags!');
-
-		const rootPath = vscode.workspace.rootPath || '';
-		if (! rootPath) {
-			// TODO: add message
-			vscode.window.showInformationMessage('No rootPath');
+		if (! getTagFilePath()) {
+			vscode.window.showErrorMessage('ctags.tagPath can not be empty');
 			return;
 		}
-		const tagPath = vscode.workspace.getConfiguration('ctags').get('tagPath') as string;
-		const tags = loadTags(rootPath, tagPath);
-		vscode.window.showInformationMessage('Tags loaded');
-		searchTags(tags);
+
+		if (! canActivatePlugin()) {
+			vscode.window.showInformationMessage('ctags can not be activated, you should be in a folder or workspace.');
+			return;
+		}
+		searchTags();
 	});
 
 	context.subscriptions.push(disposable);
@@ -44,7 +42,9 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {}
 
 
-async function searchTags(tags: Array<{}>) {
+async function searchTags() {
+	// TODO: we should be sure the tags are loaded, it can be in progress
+	const tags: Array<{}> = loadTags();
 	const item: any = await searchTagsQuickPick(tags);
 	if (! item) {
 		return;
@@ -74,9 +74,22 @@ async function searchTagsQuickPick(tags: Array<{}>) {
 	let input: vscode.QuickPick<any>;
 	const disposables: vscode.Disposable[] = [];
 	const subject = new Subject();
-	const conf = vscode.workspace.getConfiguration('ctags')
-	const debounce = conf.get('debounceTime') as number;
-	const maxNumberOfMatches = conf.get('maxNumberOfMatches') as number;
+	const conf = vscode.workspace.getConfiguration('ctags');
+	const debounce = getConfig('debounceTime') as number;
+	const maxNumberOfMatches = getConfig('maxNumberOfMatches') as number;
+
+	const settingsItems = [
+		{
+			label: 'Generate tags',
+			alwaysShow: true,
+			action: generateTags,
+		},
+		{
+			label: 'Display ctags command',
+			alwaysShow: true,
+			action: displayCtagsCommand,
+		},
+	];
 
 	const sub: Subscription = subject.pipe(
 		debounceTime(debounce),
@@ -94,14 +107,24 @@ async function searchTagsQuickPick(tags: Array<{}>) {
 	try {
 		return await new Promise<{} | undefined>((resolve, reject) => {
 			input = vscode.window.createQuickPick();
-			input.sortByLabel = false;
+			// There is a typescript issue, using sortByLabel works but it's not defined in the type
+			(input as any).sortByLabel = false;
 			input.placeholder = 'Type to search for tags';
 			disposables.push(
 				input.onDidChangeValue(value => {
-					subject.next(value);
+					if (value.startsWith('>')) {
+						input.items = settingsItems;
+					} else {
+						subject.next(value);
+					}
 				}),
 				input.onDidChangeSelection(items => {
-					resolve(items[0]);
+					const item  = items[0];
+					if (item.action) {
+						item.action();
+					} else {
+						resolve(item);
+					}
 					input.hide();
 				}),
 				input.onDidHide(() => {
