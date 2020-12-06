@@ -32,7 +32,13 @@ export function activate(context: vscode.ExtensionContext) {
 			vscode.window.showInformationMessage('ctags can not be activated, you should be in a folder or workspace.');
 			return;
 		}
-		searchTags();
+		const editor = vscode.window.activeTextEditor;
+		let text = null;
+		if (editor) {
+			let selection = editor.selection;
+			text = editor.document.getText(selection).trim();
+		}
+		searchTags(text);
 	});
 
 	context.subscriptions.push(disposable);
@@ -42,10 +48,10 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {}
 
 
-async function searchTags() {
+async function searchTags(text: string|null) {
 	// TODO: we should be sure the tags are loaded, it can be in progress
 	const tags: Array<{}> = loadTags();
-	const item: any = await searchTagsQuickPick(tags);
+	const item: any = await searchTagsQuickPick(tags, text);
 	if (! item) {
 		return;
 	}
@@ -64,13 +70,47 @@ async function searchTags() {
 		});
 }
 
-
-async function searchTagsQuickPick(tags: Array<{}>) {
+function fuseSearch(tags: Array<{}>) {
 	const options = {
 		includeScore: true,
 		keys: ['match']
 	};
-	const fuse = new Fuse(tags, options);
+	return new Fuse(tags, options);
+}
+
+
+function exactMatchSearch(tags: Array<{}>) {
+	// Same interface than fuseSearch
+	return {
+		search: (query: string) => {
+			return tags.filter((tag: any) => {
+				return tag.match === query;
+			}).map((tag) => ({ item: tag }));
+		}
+	};
+}
+
+
+async function searchTagsQuickPick(tags: Array<{}>, text: string|null) {
+	let searcher: any;
+	let exactMatch;
+	let inputItems: Array<any>;
+	if (text) {
+		searcher = exactMatchSearch(tags);
+		exactMatch = true;
+		const results = searcher.search(text);
+		if (results.length === 0) {
+			vscode.window.showInformationMessage(`Nothing found for ${text}`);
+		}
+		else if (results.length === 1) {
+			return results[0].item;
+		} else {
+			inputItems = results.map((r: any) => r.item);
+		}
+	}
+
+	searcher = fuseSearch(tags);
+
 	let input: vscode.QuickPick<any>;
 	const disposables: vscode.Disposable[] = [];
 	const subject = new Subject();
@@ -99,7 +139,7 @@ async function searchTagsQuickPick(tags: Array<{}>) {
 		if (!value) {
 			input.items = [];
 		} else {
-		const result = fuse.search(value);
+		const result = searcher.search(value);
 		input.items = result.map((r: any) => r.item).slice(0, maxNumberOfMatches);
 		}
 		input.busy = false;
@@ -107,6 +147,12 @@ async function searchTagsQuickPick(tags: Array<{}>) {
 	try {
 		return await new Promise<{} | undefined>((resolve, reject) => {
 			input = vscode.window.createQuickPick();
+			if (text) {
+				input.value = text;
+			}
+			if (inputItems) {
+				input.items = inputItems;
+			}
 			// There is a typescript issue, using sortByLabel works but it's not defined in the type
 			(input as any).sortByLabel = false;
 			input.placeholder = 'Type to search for tags';
