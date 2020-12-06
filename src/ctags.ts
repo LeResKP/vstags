@@ -1,11 +1,15 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 
+import { ReplaySubject } from 'rxjs';
 const fs = require('fs');
 const lineByLine = require('n-readlines');
 const path = require('path');
 
 import { canActivatePlugin, getAbsoluteTagFilePath, getConfig, getTagFilePath } from './helper';
+
+export const tagsSubject = new ReplaySubject(1);
+export let tagsWatcher: vscode.FileSystemWatcher;
 
 
 // TODO: ICONS should be defined according file extensions
@@ -19,16 +23,10 @@ const ICONS: any = {
 };
 
 
-const TAGS_CACHES: any = {};
-
-
 export function loadTags(force = false) {
     const rootPath = vscode.workspace.rootPath as string;
     const tagPath = getTagFilePath() as string;
-	if (!TAGS_CACHES[rootPath] || force) {
-		TAGS_CACHES[rootPath] = _loadTags(rootPath, tagPath);
-	}
-	return TAGS_CACHES[rootPath];
+    tagsSubject.next(_loadTags(rootPath, tagPath));
 }
 
 
@@ -103,13 +101,15 @@ export function generateTags() {
                     vscode.window.showErrorMessage(`Error during tag generation ${err}`);
 					return reject(err);
 				} else {
-                    progress.report({ increment: 50, message: "Loading tags" });
-                    loadTags(true);
-                    vscode.window.showInformationMessage('ctags generated');
 					resolve(stdout);
 				}
 			});
 		});
+    }).then(() => {
+        if(!tagsWatcher) {
+            loadTags();
+            watchTagFile();
+        }
     });
 }
 
@@ -122,11 +122,29 @@ export function displayCtagsCommand() {
 	});
 }
 
+export function watchTagFile() {
+    if (tagsWatcher) {
+        return;
+    }
+    const tagPath = getAbsoluteTagFilePath();
+    if (fs.existsSync(tagPath)) {
+        tagsWatcher = vscode.workspace.createFileSystemWatcher(tagPath);
+        tagsWatcher.onDidChange(() => {
+            loadTags(true);
+            vscode.window.showInformationMessage('ctags reloaded!');
+        });
+    }
+    return null;
+}
+
 
 export function checkTagsFileExists() {
     if (!canActivatePlugin()) {
         return;
     }
+
+    watchTagFile();
+
     const tagPath = getAbsoluteTagFilePath();
     if (fs.existsSync(tagPath)) {
         // We want to be sure the tags are up to date when activating a workspace/folder

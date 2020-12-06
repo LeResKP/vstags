@@ -2,11 +2,11 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 
-import { Subject, Subscription } from 'rxjs';
-import { debounceTime, distinctUntilChanged, retry } from 'rxjs/operators';
+import { Observable, Subject, Subscription } from 'rxjs';
+import { concatMap, debounceTime, distinctUntilChanged, first, map, retry, tap } from 'rxjs/operators';
 const Fuse = require('fuse.js');
 
-import { checkTagsFileExists, loadTags, generateTags, displayCtagsCommand, addCommandInGitHook } from './ctags';
+import { checkTagsFileExists, tagsSubject, tagsWatcher, generateTags, displayCtagsCommand, addCommandInGitHook } from './ctags';
 import { canActivatePlugin, getConfig, getTagFilePath } from './helper';
 
 
@@ -45,7 +45,12 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // this method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() {
+	if (tagsWatcher) {
+		// TODO: we should also dispose tagsWatcher.onDidChange
+		tagsWatcher.dispose();
+	}
+}
 
 function doSearch(text: string|null) {
 	if (! getTagFilePath()) {
@@ -61,145 +66,169 @@ function doSearch(text: string|null) {
 }
 
 
-async function searchTags(text: string|null) {
-	// TODO: we should be sure the tags are loaded, it can be in progress
-	const tags: Array<{}> = loadTags();
-	const item: any = await searchTagsQuickPick(tags, text);
-	if (! item) {
-		return;
-	}
-	vscode.workspace.openTextDocument(item.filePath)
-		.then(document => vscode.window.showTextDocument(document))
-		.then(() => {
-			if (vscode.window.activeTextEditor) {
-				let line = item.lineNumber;
-				if (line > 0) {
-					line -= 1;
+function searchTags(text: string | null) {
+	searchTagsQuickPick(text).subscribe((item: any) => {
+		if (!item) {
+			return;
+		}
+		vscode.workspace.openTextDocument(item.filePath)
+			.then(document => vscode.window.showTextDocument(document))
+			.then(() => {
+				if (vscode.window.activeTextEditor) {
+					let line = item.lineNumber;
+					if (line > 0) {
+						line -= 1;
+					}
+					let newSelection = new vscode.Selection(line, 0, line, 0);
+					vscode.window.activeTextEditor.selection = newSelection;
+					vscode.window.activeTextEditor.revealRange(newSelection, vscode.TextEditorRevealType.InCenter);
 				}
-				let newSelection = new vscode.Selection(line, 0, line, 0);
-				vscode.window.activeTextEditor.selection = newSelection;
-				vscode.window.activeTextEditor.revealRange(newSelection, vscode.TextEditorRevealType.InCenter);
-			}
-		});
+			});
+	});
 }
 
-function fuseSearch(tags: Array<{}>) {
+function fuseSearch() {
 	const options = {
 		includeScore: true,
 		keys: ['match']
 	};
-	return new Fuse(tags, options);
+	return tagsSubject.pipe(
+		first(),
+		map((tags: any) => new Fuse(tags, options))
+	);
 }
 
 
-function exactMatchSearch(tags: Array<{}>) {
+function exactMatchSearch() {
 	// Same interface than fuseSearch
-	return {
-		search: (query: string) => {
-			return tags.filter((tag: any) => {
-				return tag.match === query;
-			}).map((tag) => ({ item: tag }));
-		}
-	};
+	return tagsSubject.pipe(
+		first(),
+		map((tags: any) => {
+			return {
+				search: (query: string) => {
+					return tags.filter((tag: any) => {
+						return tag.match === query;
+					}).map((tag: any) => ({ item: tag }));
+				}
+			};
+		})
+	);
 }
 
+const settingsItems = [
+	{
+		label: 'Generate tags',
+		alwaysShow: true,
+		action: generateTags,
+	},
+	{
+		label: 'Display ctags command',
+		alwaysShow: true,
+		action: displayCtagsCommand,
+	},
+	{
+		label: 'Add/update ctags command in git hook',
+		alwaysShow: true,
+		action: addCommandInGitHook,
+	},
+];
 
-async function searchTagsQuickPick(tags: Array<{}>, text: string|null) {
-	let searcher: any;
-	let exactMatch;
-	let inputItems: Array<any>;
-	if (text) {
-		searcher = exactMatchSearch(tags);
-		exactMatch = true;
-		const results = searcher.search(text);
-		if (results.length === 0) {
-			vscode.window.showInformationMessage(`Nothing found for ${text}`);
-		}
-		else if (results.length === 1) {
-			return results[0].item;
-		} else {
-			inputItems = results.map((r: any) => r.item);
-		}
-	}
 
-	searcher = fuseSearch(tags);
-
+function searchTagsQuickPick(text: string|null) {
+	let sub: Subscription;
 	let input: vscode.QuickPick<any>;
 	const disposables: vscode.Disposable[] = [];
-	const subject = new Subject();
-	const conf = vscode.workspace.getConfiguration('ctags');
-	const debounce = getConfig('debounceTime') as number;
-	const maxNumberOfMatches = getConfig('maxNumberOfMatches') as number;
-
-	const settingsItems = [
-		{
-			label: 'Generate tags',
-			alwaysShow: true,
-			action: generateTags,
-		},
-		{
-			label: 'Display ctags command',
-			alwaysShow: true,
-			action: displayCtagsCommand,
-		},
-		{
-			label: 'Add/update ctags command in git hook',
-			alwaysShow: true,
-			action: addCommandInGitHook,
-		},
-	];
-
-	const sub: Subscription = subject.pipe(
-		debounceTime(debounce),
-		distinctUntilChanged(),
-	).subscribe((value) => {
-		input.busy = true;
-		if (!value) {
-			input.items = [];
-		} else {
-		const result = searcher.search(value);
-		input.items = result.map((r: any) => r.item).slice(0, maxNumberOfMatches);
+	return new Observable(observer => {
+		let inputItems: Array<any> = [];
+		let found = false;
+		if (text) {
+			exactMatchSearch().subscribe((obj: any) => {
+				const results = obj.search(text);
+				if (results.length === 0) {
+					vscode.window.showInformationMessage(`Nothing found for ${text}`);
+				}
+				else if (results.length === 1) {
+					found = true;
+					observer.next(results[0].item);
+					observer.complete();
+				} else {
+					inputItems = results.map((r: any) => r.item);
+				}
+			});
 		}
-		input.busy = false;
-	});
-	try {
-		return await new Promise<{} | undefined>((resolve, reject) => {
-			input = vscode.window.createQuickPick();
-			if (text) {
-				input.value = text;
+
+		if (found) {
+			return;
+		}
+
+		const searcher = fuseSearch();
+		input = vscode.window.createQuickPick();
+		const debounce = getConfig('debounceTime') as number;
+		const maxNumberOfMatches = getConfig('maxNumberOfMatches') as number;
+
+		const subject = new Subject();
+		sub = subject.pipe(
+			debounceTime(debounce),
+			distinctUntilChanged(),
+		).subscribe((value) => {
+			input.busy = true;
+			if (!value) {
+				input.items = [];
+				input.busy = false;
+			} else {
+				searcher.subscribe((obj: any) => {
+					const results = obj.search(value);
+					input.items = results.map((r: any) => r.item).slice(0, maxNumberOfMatches);
+					input.busy = false;
+				});
 			}
-			if (inputItems) {
-				input.items = inputItems;
-			}
-			// There is a typescript issue, using sortByLabel works but it's not defined in the type
-			(input as any).sortByLabel = false;
-			input.placeholder = 'Type to search for tags';
-			disposables.push(
-				input.onDidChangeValue(value => {
-					if (value.startsWith('>')) {
-						input.items = settingsItems;
-					} else {
-						subject.next(value);
-					}
-				}),
-				input.onDidChangeSelection(items => {
-					const item  = items[0];
-					if (item.action) {
-						item.action();
-					} else {
-						resolve(item);
-					}
-					input.hide();
-				}),
-				input.onDidHide(() => {
-					resolve(undefined);
-					input.dispose();
-				})
-			);
-			input.show();
 		});
-	} finally {
-		disposables.forEach(d => d.dispose());
-		sub.unsubscribe();
-	}
+		if (text) {
+			input.value = text;
+		}
+		if (inputItems.length) {
+			input.items = inputItems;
+		}
+		// There is a typescript issue, using sortByLabel works but it's not defined in the type
+		(input as any).sortByLabel = false;
+		input.placeholder = 'Type to search for tags';
+		let isCompleted = false;
+		disposables.push(
+			input.onDidChangeValue(value => {
+				if (value.startsWith('>')) {
+					input.items = settingsItems;
+				} else {
+					subject.next(value);
+				}
+			}),
+			input.onDidChangeSelection(items => {
+				const item  = items[0];
+				if (item.action) {
+					item.action();
+				} else {
+					isCompleted = true;
+					observer.next(item);
+					observer.complete();
+				}
+				input.hide();
+			}),
+			input.onDidHide(() => {
+				if (!isCompleted) {
+					observer.next(null);
+					observer.complete();
+				}
+			})
+		);
+		input.show();
+	}).pipe(
+		tap(() => {
+			if (input) {
+				input.dispose();
+			}
+			disposables.forEach(d => d.dispose());
+			if (sub) {
+				sub.unsubscribe();
+			}
+		})
+	);
 }
