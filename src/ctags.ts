@@ -8,7 +8,6 @@ const path = require('path');
 import { canActivatePlugin, getAbsoluteTagFilePath, getConfig, getTagFilePath } from './helper';
 
 
-
 // TODO: ICONS should be defined according file extensions
 // ctags --list-kinds
 const ICONS: any = {
@@ -45,11 +44,11 @@ function _loadTags(rootPath: string, tagPath: string){
         }
         let elements = asciiLine.split('\t');
 
-        let name, relPath, lineNumber, kind, scope;
+        let name, absPath, lineNumber, kind, scope;
         if (elements.length === 4) {
-            [name, relPath, lineNumber, kind] = elements;
+            [name, absPath, lineNumber, kind] = elements;
         } else if (elements.length > 4) {
-            [name, relPath, lineNumber, kind, scope] = elements;
+            [name, absPath, lineNumber, kind, scope] = elements;
         } else {
             console.error('ctags parse error', elements);
             continue;
@@ -66,8 +65,8 @@ function _loadTags(rootPath: string, tagPath: string){
         tags.push({
             description: scope,
             label: `${icon}${name}`,
-            detail: relPath,
-            filePath: path.join(rootPath, relPath),
+            detail: path.relative(rootPath,absPath),
+            filePath: absPath,
             lineNumber,
             alwaysShow: true,
             match: name,
@@ -79,12 +78,13 @@ function _loadTags(rootPath: string, tagPath: string){
 
 
 export function getCtagsCommand() {
-    const tagPath = getTagFilePath() as string;
+    const rootPath = vscode.workspace.rootPath as string;
+    const tagPath = getAbsoluteTagFilePath() as string;
     const excludeFolders = getConfig('excludeFolders') as Array<string>;
     const params = excludeFolders.map((f) => `--exclude=${f}`).join(' ');
     const commandParams = getConfig('ctagsCommandParams') as Array<string>;
     const extraParams = commandParams.join(' ');
-    return `ctags -R --excmd=number ${params} ${extraParams} -f ${tagPath}`;
+    return `ctags -R --excmd=number ${params} ${extraParams} -f ${tagPath} ${rootPath}`;
 }
 
 
@@ -141,4 +141,85 @@ export function checkTagsFileExists() {
 			generateTags();
 		}
 	});
+}
+
+
+export function addCommandInGitHook() {
+    const rootPath = vscode.workspace.rootPath as string;
+    const gitPath = path.join(rootPath, '.git');
+    if (!fs.existsSync(gitPath)) {
+        vscode.window.showErrorMessage(`No .git folder in ${rootPath}`);
+        return;
+    }
+    const hookPath = path.join(gitPath, 'hooks/post-merge');
+    const promise = new Promise((resolve, reject) => {
+        if (fs.existsSync(hookPath)) {
+            resolve();
+            return;
+        }
+        fs.writeFile(hookPath, `#!/usr/bin/sh\n`, (error: any) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+            fs.chmod(hookPath, '775', (error: any) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve();
+            });
+        });
+    }).then(() => {
+        return updateHookFile(hookPath);
+   }).then(() => {
+        vscode.workspace.openTextDocument(hookPath)
+            .then(document => vscode.window.showTextDocument(document));
+   }).catch((error) => {
+       vscode.window.showErrorMessage(error.toString());
+   });
+}
+
+
+function updateHookFile(hookPath: string) {
+    const encoding = 'utf-8';
+    const date = new Date().toISOString();
+    const text = `# vscode ctags do not edit manually\n# ${date}\n${getCtagsCommand()}\n# end vscode ctags`;
+    return new Promise((resolve, reject) => {
+        let liner;
+        try {
+            liner = new lineByLine(hookPath);
+        } catch (error) {
+            reject(error);
+            return;
+        }
+        let line;
+
+        let cnt = 0;
+        const lis = [];
+        while (line = liner.next()) {
+            const utf8Line = line.toString(encoding);
+            let pushList = true;
+            if (cnt !== 0) {
+                cnt += 1;
+            } else if (utf8Line.match('^# vscode ctags')) {
+                cnt += 1;
+                lis.push(text);
+                pushList = false;
+            }
+            if (cnt === 0 || cnt > 4) {
+                lis.push(utf8Line);
+            }
+        }
+        if (cnt === 0) {
+            lis.push(`\n${text}`);
+        }
+        fs.writeFile(hookPath, lis.join('\n'), encoding, (error: any) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve();
+        });
+    });
 }

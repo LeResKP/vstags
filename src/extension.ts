@@ -6,7 +6,7 @@ import { Subject, Subscription } from 'rxjs';
 import { debounceTime, distinctUntilChanged, retry } from 'rxjs/operators';
 const Fuse = require('fuse.js');
 
-import { checkTagsFileExists, loadTags, generateTags, displayCtagsCommand } from './ctags';
+import { checkTagsFileExists, loadTags, generateTags, displayCtagsCommand, addCommandInGitHook } from './ctags';
 import { canActivatePlugin, getConfig, getTagFilePath } from './helper';
 
 
@@ -141,6 +141,11 @@ async function searchTagsQuickPick(tags: Array<{}>, text: string|null) {
 			label: 'Display ctags command',
 			alwaysShow: true,
 			action: displayCtagsCommand,
+		},
+		{
+			label: 'Add/update ctags command in git hook',
+			alwaysShow: true,
+			action: addCommandInGitHook,
 		},
 	];
 
