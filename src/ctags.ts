@@ -169,7 +169,11 @@ export function addCommandInGitHook() {
         vscode.window.showErrorMessage(`No .git folder in ${rootPath}`);
         return;
     }
-    const hookPath = path.join(gitPath, 'hooks/post-merge');
+    addHookFile(path.join(gitPath, 'hooks/post-merge'));
+    addHookFile(path.join(gitPath, 'hooks/post-checkout'));
+}
+
+function addHookFile(hookPath: string) {
     const promise = new Promise((resolve, reject) => {
         if (fs.existsSync(hookPath)) {
             resolve();
@@ -192,7 +196,7 @@ export function addCommandInGitHook() {
         return updateHookFile(hookPath);
    }).then(() => {
         vscode.workspace.openTextDocument(hookPath)
-            .then(document => vscode.window.showTextDocument(document));
+            .then(document => vscode.window.showTextDocument(document, {preview: false}));
    }).catch((error) => {
        vscode.window.showErrorMessage(error.toString());
    });
