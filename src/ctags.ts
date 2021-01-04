@@ -82,7 +82,7 @@ export function getCtagsCommand() {
     const params = excludeFolders.map((f) => `--exclude=${f}`).join(' ');
     const commandParams = getConfig('ctagsCommandParams') as Array<string>;
     const extraParams = commandParams.join(' ');
-    return `ctags -R --excmd=number ${params} ${extraParams} -f ${tagPath} ${rootPath}`;
+    return `(ctags -R --excmd=number ${params} ${extraParams} -f ${tagPath}.building ${rootPath} && mv ${tagPath}.building ${tagPath})`;
 }
 
 
@@ -206,7 +206,7 @@ function addHookFile(hookPath: string) {
 function updateHookFile(hookPath: string) {
     const encoding = 'utf-8';
     const date = new Date().toISOString();
-    const text = `# vscode ctags do not edit manually\n# ${date}\n${getCtagsCommand()}\n# end vscode ctags`;
+    const text = `# vscode ctags do not edit manually\n# ${date}\n${getCtagsCommand()} 2> /dev/null &\n# end vscode ctags`;
     return new Promise((resolve, reject) => {
         let liner;
         try {
